@@ -33,11 +33,11 @@ def get_us_symbols():
 @st.cache_data
 def get_saudi_symbols():
     # جلب الأسهم السعودية من Tadawul أو مصدر HTML مباشر
-    url = "https://www.saudiexchange.sa/wps/portal/tadawul/markets/equities/market-watch"  # مثال
+    url = "https://www.argaam.com/ar/company/companies-prices"  # مثال
     try:
         tables = pd.read_html(url)
         df = tables[0]  # افتراض أن جدول الأسهم هو الأول
-        symbols = df['رمز الشركة'].astype(str) + ".TADAWUL"
+        symbols = df['رمز السهم'].astype(str) + ".TADAWUL"
         return symbols.tolist()
     except:
         st.warning("⚠️ تعذر جلب الأسهم السعودية، يرجى التحقق من الرابط أو الاتصال بالإنترنت")
