@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import ta
 import hashlib
+import requests
 
 # ===== حماية بكلمة مرور =====
 PASSWORD_HASH = hashlib.sha256("mypassword123".encode()).hexdigest()
@@ -20,30 +21,53 @@ if not check_password():
 st.set_page_config(page_title="Market Scanner", layout="wide")
 st.title("📊 Market Scanner Dashboard")
 
-# ===== رموز الأسهم =====
-stocks_saudi = ["2222.TADAWUL","1010.TADAWUL","1111.TADAWUL","1211.TADAWUL","1120.TADAWUL","1180.TADAWUL","1020.TADAWUL","1120.TADAWUL","1303.TADAWUL","7010.TADAWUL","7202.TADAWUL","8313.TADAWUL"]
-stocks_us = ["AAPL","AA","ACA","ACI","ACM","MSFT","NVDA","AMD","AMZN","TSLA"]
+# ===== دوال لجلب الأسهم ديناميكيًا =====
+@st.cache_data
+def get_us_symbols():
+    # جلب الشركات المدرجة في S&P500 كمثال
+    tables = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+    df = tables[0]
+    symbols = df['Symbol'].tolist()
+    return symbols
 
-# اختيار السوق
-market = st.selectbox("السوق", ["الكل","السعودي","الأمريكي"])
-rating_filter = st.selectbox("التقييم", ["الكل","⭐⭐⭐⭐","⭐⭐⭐"])
+@st.cache_data
+def get_saudi_symbols():
+    # جلب الأسهم السعودية من Tadawul أو مصدر HTML مباشر
+    url = "https://www.saudiexchange.sa/wps/portal/tadawul/markets/equities/market-watch"  # مثال
+    try:
+        tables = pd.read_html(url)
+        df = tables[0]  # افتراض أن جدول الأسهم هو الأول
+        symbols = df['رمز الشركة'].astype(str) + ".TADAWUL"
+        return symbols.tolist()
+    except:
+        st.warning("⚠️ تعذر جلب الأسهم السعودية، يرجى التحقق من الرابط أو الاتصال بالإنترنت")
+        return []
+
+# ===== اختيار السوق =====
+market = st.selectbox("السوق", ["الكل", "السعودي", "الأمريكي"])
+rating_filter = st.selectbox("التقييم", ["الكل", "⭐⭐⭐⭐", "⭐⭐⭐"])
 
 if market == "السعودي":
-    symbols = stocks_saudi
+    symbols = get_saudi_symbols()
 elif market == "الأمريكي":
-    symbols = stocks_us
+    symbols = get_us_symbols()
 else:
-    symbols = stocks_saudi + stocks_us
+    symbols = get_saudi_symbols() + get_us_symbols()
 
-st.info(f"⏳ جاري فحص {len(symbols)} سهم مباشرة من الإنترنت...")
+st.info(f"⏳ جاري فحص {len(symbols)} سهم مباشرة من الإنترنت... قد يستغرق عدة دقائق")
 
+# ===== الفحص الفني المباشر =====
 results = []
 
-for symbol in symbols:
+progress = st.progress(0)
+total = len(symbols)
+
+for i, symbol in enumerate(symbols):
     try:
         df = yf.download(symbol, period="6mo", interval="1d", progress=False)
         if df.empty or len(df) < 200: continue
 
+        # المؤشرات الفنية
         df["ma20"] = df["Close"].rolling(20).mean()
         df["ma50"] = df["Close"].rolling(50).mean()
         df["ma200"] = df["Close"].rolling(200).mean()
@@ -61,6 +85,7 @@ for symbol in symbols:
         if not (strong_trend and breakout and 55 < last["rsi"] < 68 and volume_ratio > 1.3):
             continue
 
+        # فلترة خاصة بالسعودي
         if ".TADAWUL" in symbol:
             value_traded = last["Close"] * last["Volume"]
             change_pct = abs((last["Close"] - prev["Close"])/prev["Close"])*100
@@ -89,12 +114,13 @@ for symbol in symbols:
             })
     except:
         continue
+    progress.progress((i+1)/total)
 
 # ===== عرض النتائج =====
 if results:
     df_results = pd.DataFrame(results)
     if rating_filter != "الكل":
         df_results = df_results[df_results["rating"]==rating_filter]
-    st.dataframe(df_results,use_container_width=True)
+    st.dataframe(df_results, use_container_width=True)
 else:
     st.warning("❌ لم يتم العثور على أي فرص حالياً")
