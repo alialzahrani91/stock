@@ -21,7 +21,7 @@ st.set_page_config(page_title="Market Scanner", layout="wide")
 st.title("📊 Market Scanner Dashboard")
 
 # ===== رموز الأسهم =====
-stocks_saudi = ["2222.TADAWUL","1211.TADAWUL","1120.TADAWUL","1180.TADAWUL"]
+stocks_saudi = ["2222.TADAWUL","1010.TADAWUL","1111.TADAWUL","1211.TADAWUL","1120.TADAWUL","1180.TADAWUL","1020.TADAWUL","1120.TADAWUL","1303.TADAWUL","7010.TADAWUL","7202.TADAWUL","8313.TADAWUL"]
 stocks_us = ["AAPL","MSFT","NVDA","AMD","AMZN","TSLA"]
 
 # اختيار السوق
