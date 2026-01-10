@@ -1,132 +1,105 @@
 import streamlit as st
 import requests
-from bs4 import BeautifulSoup
-import yfinance as yf
 import pandas as pd
-import ta
-import hashlib
+import numpy as np
 
-# ===== حماية بكلمة مرور =====
-PASSWORD_HASH = hashlib.sha256("mypassword123".encode()).hexdigest()
-def check_password():
-    st.sidebar.header("🔐 تسجيل الدخول")
-    password = st.sidebar.text_input("كلمة المرور", type="password")
-    if hashlib.sha256(password.encode()).hexdigest() == PASSWORD_HASH:
-        return True
-    return False
+st.set_page_config(page_title="Market Dashboard", layout="wide")
 
-if not check_password():
-    st.warning("❌ كلمة المرور غير صحيحة")
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Content-Type": "application/json"
+}
+
+# =============================
+# دالة جلب السوق
+# =============================
+def fetch_market(market):
+    url = f"https://scanner.tradingview.com/{market}/scan"
+    payload = {
+        "filter": [],
+        "symbols": {"query": {"types": []}, "tickers": []},
+        "columns": ["name", "description", "close", "change", "relative_volume_10d_calc"],
+        "sort": {"sortBy": "change", "sortOrder": "desc"},
+        "range": [0, 300]
+    }
+    try:
+        r = requests.post(url, json=payload, headers=HEADERS, timeout=15)
+        r.raise_for_status()
+    except requests.exceptions.RequestException:
+        st.warning(f"⚠️ تعذر جلب سوق {market}")
+        return pd.DataFrame()
+
+    data = r.json().get("data", [])
+    rows = []
+    for d in data:
+        rows.append({
+            "Symbol": d["s"],
+            "Company": d["d"][1],
+            "Price": d["d"][2],
+            "Change %": d["d"][3],
+            "Relative Volume": d["d"][4]
+        })
+    return pd.DataFrame(rows)
+
+# =============================
+# دالة حساب RSI بسيطة
+# =============================
+def compute_rsi(prices, period=14):
+    delta = prices.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+    rs = avg_gain / (avg_loss + 1e-6)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+# =============================
+# دالة إضافة إشارات التداول
+# =============================
+def add_signals(df):
+    if df.empty:
+        return df
+
+    df["إشارة"] = "❌ لا"
+    df["سعر الدخول"] = None
+    df["جني الأرباح"] = None
+    df["وقف الخسارة"] = None
+    df["قوة السهم"] = "🔴 ضعيف"
+
+    # إضافة RSI وهمي بناءً على السعر الحالي للتجربة
+    df["RSI"] = compute_rsi(df["Price"].astype(float).cumsum())  # استخدام cumsum لمحاكاة تغير السعر
+
+    # شروط الشراء: تغيير سعر + حجم تداول + RSI منخفض
+    buy = (df["Change %"] > 1.5) & (df["Relative Volume"] > 1.2) & (df["RSI"] < 40)
+
+    df.loc[buy, "إشارة"] = "🔥 شراء"
+    df.loc[buy, "سعر الدخول"] = (df["Price"] * 0.998).round(2)  # الدخول عند سعر أقل قليلاً
+    df.loc[buy, "جني الأرباح"] = (df["Price"] * 1.05).round(2)
+    df.loc[buy, "وقف الخسارة"] = (df["Price"] * 0.975).round(2)
+    df.loc[buy, "قوة السهم"] = "⭐ قوي"
+
+    return df
+
+# =============================
+# واجهة المستخدم
+# =============================
+st.title("📊 Dashboard الفرص المضاربية")
+
+# اختيار السوق
+market_choice = st.selectbox("اختر السوق:", ["السوق السعودي", "السوق الأمريكي"])
+
+with st.spinner(f"جلب بيانات {market_choice}..."):
+    if market_choice == "السوق السعودي":
+        df = fetch_market("ksa")
+    else:
+        df = fetch_market("america")
+
+df = add_signals(df)
+
+if df.empty:
+    st.error("❌ لم يتم جلب أي بيانات من TradingView")
     st.stop()
 
-st.set_page_config(page_title="Market Scanner", layout="wide")
-st.title("📊 Market Scanner Dashboard - Saudi & US Stocks from TradingView")
-
-# ===== دالة جلب الأسهم السعودية =====
-@st.cache_data(ttl=24*3600)
-def get_saudi_symbols():
-    url = "https://ar.tradingview.com/markets/stocks-ksa/market-movers-all-stocks/"
-    res = requests.get(url)
-    if res.status_code != 200:
-        st.warning("⚠️ تعذر جلب الأسهم السعودية من TradingView")
-        return []
-
-    soup = BeautifulSoup(res.text, "html.parser")
-    symbols = []
-    for row in soup.select("table tbody tr"):
-        cells = row.find_all("td")
-        if len(cells) > 0:
-            symbol_text = cells[0].get_text(strip=True)
-            symbols.append(symbol_text + ".TADAWUL")
-    return symbols
-
-# ===== دالة جلب الأسهم الأمريكية =====
-@st.cache_data(ttl=24*3600)
-def get_us_symbols():
-    url = "https://ar.tradingview.com/markets/stocks-usa/market-movers-all-stocks/"
-    res = requests.get(url)
-    if res.status_code != 200:
-        st.warning("⚠️ تعذر جلب الأسهم الأمريكية من TradingView")
-        return []
-
-    soup = BeautifulSoup(res.text, "html.parser")
-    symbols = []
-    for row in soup.select("table tbody tr"):
-        cells = row.find_all("td")
-        if len(cells) > 0:
-            symbol_text = cells[0].get_text(strip=True)
-            symbols.append(symbol_text)
-    return symbols
-
-# ===== اختيار السوق =====
-market = st.selectbox("اختر السوق", ["السعودي", "الأمريكي", "الكل"])
-
-symbols = []
-if market == "السعودي":
-    symbols = get_saudi_symbols()
-elif market == "الأمريكي":
-    symbols = get_us_symbols()
-else:
-    symbols = get_saudi_symbols() + get_us_symbols()
-
-st.info(f"⏳ جاري فحص {len(symbols)} سهم من {market}... قد يستغرق عدة دقائق")
-
-# ===== الفحص الفني =====
-results = []
-progress = st.progress(0)
-total = len(symbols)
-
-for i, symbol in enumerate(symbols):
-    try:
-        df = yf.download(symbol, period="6mo", interval="1d", progress=False)
-        if df.empty or len(df) < 50: 
-            continue
-
-        # مؤشرات فنية
-        df["ma20"] = df["Close"].rolling(20).mean()
-        df["ma50"] = df["Close"].rolling(50).mean()
-        df["ma200"] = df["Close"].rolling(200).mean()
-        df["rsi"] = ta.momentum.RSIIndicator(df["Close"]).rsi()
-        df["vol_avg"] = df["Volume"].rolling(20).mean()
-        df["atr"] = ta.volatility.AverageTrueRange(df["High"], df["Low"], df["Close"]).average_true_range()
-
-        last = df.iloc[-1]
-
-        strong_trend = last["Close"] > last["ma20"] > last["ma50"] > last["ma200"]
-        breakout = last["Close"] >= df["High"].rolling(20).max().iloc[-1]
-        volume_ratio = last["Volume"] / last["vol_avg"]
-
-        if not (strong_trend and breakout and 55 < last["rsi"] < 68 and volume_ratio > 1.3):
-            continue
-
-        # إعداد الدخول والخروج
-        entry = last["Close"]
-        stop = entry - (last["atr"]*1.2)
-        risk = entry - stop
-        target1 = entry + risk
-        target2 = entry + (2*risk)
-
-        if volume_ratio>=2 and 58<=last["rsi"]<=65: rating="⭐⭐⭐⭐"
-        elif volume_ratio>=1.5: rating="⭐⭐⭐"
-        else: rating="⭐⭐"
-
-        results.append({
-            "symbol":symbol,
-            "rating":rating,
-            "entry":round(entry,2),
-            "stop":round(stop,2),
-            "target_1":round(target1,2),
-            "target_2":round(target2,2),
-            "rsi":round(last["rsi"],1),
-            "volume_power":round(volume_ratio,2)
-        })
-    except:
-        continue
-    progress.progress((i+1)/total)
-
-# ===== عرض النتائج =====
-if results:
-    df_results = pd.DataFrame(results)
-    st.dataframe(df_results, use_container_width=True)
-else:
-    st.warning("❌ لم يتم العثور على أي فرص حالياً")
+st.success(f"تم تحميل {len(df)} سهم")
+st.dataframe(df, use_container_width=True, hide_index=True)
