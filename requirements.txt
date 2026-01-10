@@ -2,6 +2,6 @@ streamlit
 requests
 beautifulsoup4
 pandas
-yfinance
+yfinance==0.2.27
 ta
 hashlib
