@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import pandas as pd
-import yfinance as yf
 from datetime import datetime
 
 st.set_page_config(page_title="Market Dashboard", layout="wide")
@@ -47,25 +46,6 @@ def fetch_market(market):
     return pd.DataFrame(rows)
 
 # =============================
-# RSI حقيقي
-# =============================
-def calculate_rsi(symbol, period=14):
-    try:
-        data = yf.download(symbol, period="3mo")
-        if data.empty:
-            return None
-        delta = data['Close'].diff()
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        avg_gain = gain.rolling(period).mean()
-        avg_loss = loss.rolling(period).mean()
-        rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
-        return rsi.iloc[-1]
-    except:
-        return None
-
-# =============================
 # إشارات وحالة السهم
 # =============================
 def add_signals(df):
@@ -78,61 +58,29 @@ def add_signals(df):
     df["جني الأرباح"] = None
     df["وقف الخسارة"] = None
     df["قوة السهم"] = "🔴 ضعيف"
-    df["RSI"] = None
-    df["Score"] = 0
-    df["تصنيف"] = "مضاربة"
+
+    strong_buy = (df["Change %"] > 2) & (df["Relative Volume"] > 1.5) & (df["PE"].fillna(100) < 30)
+    potential_buy = ((df["Change %"] > 1) | (df["Relative Volume"] > 1.2)) & (df["PE"].fillna(100) < 50)
 
     for idx, row in df.iterrows():
-        rsi = calculate_rsi(row["Symbol"])
-        df.at[idx, "RSI"] = round(rsi,2) if rsi else None
-        score = 0
-
-        # قاعدة إشارات
-        if row["Change %"] > 2:
-            score += 2
-        if row["Relative Volume"] > 1.5:
-            score += 2
-        if row["PE"] and row["PE"] < 30:
-            score += 1
-        if rsi and rsi < 30:
-            score += 2
-        elif rsi and rsi > 70:
-            score -= 1
-
-        df.at[idx, "Score"] = score
-
-        # تصنيف الحالة
-        if score >= 5:
+        if strong_buy.get(idx, False):
             df.at[idx, "الحالة"] = "⭐ قوي للشراء"
             df.at[idx, "قوة السهم"] = "⭐ قوي"
             df.at[idx, "إشارة"] = "🔥 شراء"
-            df.at[idx, "سعر الدخول"] = row["Price"] * 0.995  # Pullback
-            df.at[idx, "جني الأرباح"] = (row["Price"] * 1.05).round(2)
-            df.at[idx, "وقف الخسارة"] = (row["Price"] * 0.975).round(2)
-            df.at[idx, "تصنيف"] = "سوينق"
-        elif score >=3:
+            df.at[idx, "سعر الدخول"] = row["Price"]
+            df.at[idx, "جني الأرباح"] = round(row["Price"] * 1.05, 2)
+            df.at[idx, "وقف الخسارة"] = round(row["Price"] * 0.975, 2)
+        elif potential_buy.get(idx, False):
             df.at[idx, "الحالة"] = "⚡ فرصة محتملة"
             df.at[idx, "قوة السهم"] = "⚡ متوسط"
             df.at[idx, "إشارة"] = "⚡ متابعة"
             df.at[idx, "سعر الدخول"] = row["Price"]
-            df.at[idx, "جني الأرباح"] = (row["Price"] * 1.03).round(2)
-            df.at[idx, "وقف الخسارة"] = (row["Price"] * 0.985).round(2)
+            df.at[idx, "جني الأرباح"] = round(row["Price"] * 1.03, 2)
+            df.at[idx, "وقف الخسارة"] = round(row["Price"] * 0.985, 2)
+        elif row["Change %"] < 0:
+            df.at[idx, "الحالة"] = "🔴 ضعيف"
 
     return df
-
-# =============================
-# الفوليوم التاريخي
-# =============================
-def fetch_historical_volume(symbol, period="1mo"):
-    try:
-        data = yf.download(symbol, period=period)
-        if data.empty:
-            return None, None
-        last_volume = data['Volume'].iloc[-1]
-        avg_volume_20 = data['Volume'].tail(20).mean()
-        return last_volume, avg_volume_20
-    except:
-        return None, None
 
 # =============================
 # إدارة الصفقة
@@ -182,10 +130,6 @@ with page[0]:
         st.info("لا توجد بيانات حالياً")
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
-        # تنبيه للفرص القوية
-        strong_alerts = df[df["Score"]>=5]
-        for _, row in strong_alerts.iterrows():
-            st.success(f"🔔 فرصة قوية: {row['Symbol']} - {row['الحالة']} - Score: {row['Score']}")
 
 # =============================
 # تاب أقوى الأسهم
@@ -205,15 +149,14 @@ with page[2]:
     st.subheader("إدارة الصفقة")
     symbol = st.text_input("رمز السهم")
     price_buy = st.number_input("سعر الشراء", min_value=0.0, step=0.01)
+    current_price = st.number_input("السعر الحالي للسهم (اختياري)", min_value=0.0, step=0.01)
     if st.button("تحليل الصفقة"):
-        if symbol and price_buy > 0:
-            try:
-                current_price = yf.download(symbol, period="1d")['Close'][-1]
-                result = trade_analysis(price_buy, current_price)
-                st.write(f"السعر الحالي: {current_price:.2f}")
-                st.write(f"التوصية: {result}")
-            except:
-                st.error("❌ تعذر جلب بيانات السهم")
+        if symbol and price_buy > 0 and current_price > 0:
+            result = trade_analysis(price_buy, current_price)
+            st.write(f"السعر الحالي: {current_price:.2f}")
+            st.write(f"التوصية: {result}")
+        else:
+            st.error("❌ يرجى إدخال السعر الحالي والشراء")
 
 # =============================
 # تاب تتبع الصفقات
@@ -242,16 +185,4 @@ with page[3]:
 # =============================
 with page[4]:
     st.subheader("أعلى الفوليوم")
-    high_volume_stocks = []
-    for _, row in df.iterrows():
-        current_volume, avg_volume_20 = fetch_historical_volume(row["Symbol"])
-        if current_volume and avg_volume_20 and current_volume > avg_volume_20:
-            row_copy = row.copy()
-            row_copy["الفوليوم الحالي"] = current_volume
-            row_copy["متوسط 20 جلسة"] = round(avg_volume_20, 2)
-            high_volume_stocks.append(row_copy)
-    hv_df = pd.DataFrame(high_volume_stocks)
-    if hv_df.empty:
-        st.info("لا توجد أسهم بفوليوم أعلى من متوسط 20 جلسة حالياً")
-    else:
-        st.dataframe(hv_df, use_container_width=True, hide_index=True)
+    st.info("الميزة هذه ستحتاج الربط بمصدر الفوليوم التاريخي من TradingView أو Excel")
