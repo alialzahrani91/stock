@@ -6,107 +6,105 @@ from datetime import datetime
 st.set_page_config(page_title="Market Dashboard", layout="wide")
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
+CSV_FILE = "stocks.csv"
 TRADES_FILE = "trades.csv"
-EXCEL_FILE = "stocks.xlsx"  # ملف الأسهم الأساسي
 
 # =============================
-# 1️⃣ جلب البيانات الأولية من Excel
+# تحميل بيانات الأسهم من CSV
 # =============================
 def load_stocks():
-    try:
-        df = pd.read_excel(EXCEL_FILE)
-        return df
-    except FileNotFoundError:
-        st.error(f"❌ لم يتم العثور على ملف {EXCEL_FILE}")
-        return pd.DataFrame()
-        
-# =============================
-# 2️⃣ تحليل الأسهم وجلب التوصيات من الإنترنت
-# =============================
-def fetch_recommendations(symbol):
-    """مثال: جلب توصيات من TradingView API"""
-    try:
-        url = f"https://scanner.tradingview.com/america/scan"  # مثال للسوق الأمريكي
-        payload = {
-            "filter": [{"left": "name", "operation": "equal", "right": symbol}],
-            "columns": ["RSI", "close", "change", "relative_volume_10d_calc"]
+    import os
+    if not os.path.exists(CSV_FILE):
+        st.warning(f"❌ لم يتم العثور على ملف {CSV_FILE}. سيتم استخدام بيانات اختبارية.")
+        data = {
+            "Symbol": ["AAPL","TSLA","AMZN","MSFT","NVDA"],
+            "Company": ["Apple Inc.","Tesla Inc.","Amazon.com","Microsoft Corp","Nvidia Corp"],
+            "Price": [170,700,130,310,420],
+            "Change %": [1.2,2.5,0.8,1.5,3.0],
+            "Relative Volume": [1.3,1.8,1.0,1.6,2.0],
+            "PE": [28,50,60,35,45]
         }
-        r = requests.post(url, json=payload, headers=HEADERS, timeout=10)
-        r.raise_for_status()
-        data = r.json().get("data", [])
-        if not data:
-            return None
-        return data[0]["d"]  # بيانات أول صف
-    except:
-        return None
+        return pd.DataFrame(data)
+    else:
+        return pd.read_csv(CSV_FILE)
 
+# =============================
+# إشارات وحالة السهم
+# =============================
 def add_signals(df):
-    """إضافة إشارات علمية وحالة السهم"""
     if df.empty:
         return df
-    
+
     df["الحالة"] = "🟡 مراقبة"
     df["إشارة"] = "❌ لا"
     df["سعر الدخول"] = None
     df["جني الأرباح"] = None
     df["وقف الخسارة"] = None
     df["قوة السهم"] = "🔴 ضعيف"
-    
-    for idx, row in df.iterrows():
-        rsi = fetch_recommendations(row["Symbol"])
-        # مثال حساب إشارات بناءً على البيانات
-        if rsi:
-            rsi_val = float(rsi[0])  # افتراض RSI في أول عمود
-            if rsi_val < 30:
-                df.at[idx, "إشارة"] = "🔥 شراء"
-                df.at[idx, "سعر الدخول"] = row["Price"]
-                df.at[idx, "جني الأرباح"] = round(row["Price"] * 1.05, 2)
-                df.at[idx, "وقف الخسارة"] = round(row["Price"] * 0.975, 2)
-                df.at[idx, "قوة السهم"] = "⭐ قوي"
-                df.at[idx, "الحالة"] = "⭐ فرصة قوية"
-            elif rsi_val < 50:
-                df.at[idx, "إشارة"] = "⚡ متابعة"
-                df.at[idx, "سعر الدخول"] = row["Price"]
-                df.at[idx, "جني الأرباح"] = round(row["Price"] * 1.03, 2)
-                df.at[idx, "وقف الخسارة"] = round(row["Price"] * 0.985, 2)
-                df.at[idx, "قوة السهم"] = "⚡ متوسط"
-                df.at[idx, "الحالة"] = "⚡ فرصة محتملة"
+
+    strong_buy = (df["Change %"] > 2) & (df["Relative Volume"] > 1.5) & (df["PE"].fillna(100) < 30)
+    potential_buy = ((df["Change %"] > 1) | (df["Relative Volume"] > 1.2)) & (df["PE"].fillna(100) < 50)
+
+    df.loc[strong_buy, "الحالة"] = "⭐ قوي للشراء"
+    df.loc[potential_buy & ~strong_buy, "الحالة"] = "⚡ فرصة محتملة"
+    df.loc[df["Change %"] < 0, "الحالة"] = "🔴 ضعيف"
+
+    df.loc[strong_buy, "قوة السهم"] = "⭐ قوي"
+    df.loc[potential_buy & ~strong_buy, "قوة السهم"] = "⚡ متوسط"
+
+    df.loc[strong_buy, "إشارة"] = "🔥 شراء"
+    df.loc[strong_buy, "سعر الدخول"] = df["Price"]
+    df.loc[strong_buy, "جني الأرباح"] = (df["Price"] * 1.05).round(2)
+    df.loc[strong_buy, "وقف الخسارة"] = (df["Price"] * 0.975).round(2)
+
+    df.loc[potential_buy & ~strong_buy, "إشارة"] = "⚡ متابعة"
+    df.loc[potential_buy & ~strong_buy, "سعر الدخول"] = df["Price"]
+    df.loc[potential_buy & ~strong_buy, "جني الأرباح"] = (df["Price"] * 1.03).round(2)
+    df.loc[potential_buy & ~strong_buy, "وقف الخسارة"] = (df["Price"] * 0.985).round(2)
+
     return df
 
 # =============================
-# 3️⃣ إدارة وتدريب الصفقات
+# إدارة الصفقة
 # =============================
 def trade_analysis(price_buy, current_price):
     gain_percent = (current_price - price_buy) / price_buy * 100
     if gain_percent >= 5:
         return "💰 يفضل بيع جزئي"
-    elif gain_percent <= -3:
+    elif gain_percent < -3:
         return "⚠️ وقف الخسارة / بيع"
     else:
         return "⏳ الاستمرار بالصفقة"
 
+# =============================
+# حفظ ومتابعة الصفقات
+# =============================
 def load_trades():
-    try:
+    import os
+    if os.path.exists(TRADES_FILE):
         return pd.read_csv(TRADES_FILE)
-    except:
+    else:
         return pd.DataFrame(columns=["Date","Symbol","Price","Quantity"])
 
 def save_trades(df):
     df.to_csv(TRADES_FILE, index=False)
 
 # =============================
-# 4️⃣ واجهة المستخدم - Tabs
+# واجهة المستخدم
 # =============================
 st.title("📊 Market Dashboard")
-tabs = st.tabs(["فرص مضاربية", "أقوى الأسهم", "إدارة الصفقة", "تتبع الصفقات"])
+tabs = ["فرص مضاربية", "أقوى الأسهم", "إدارة الصفقة", "تتبع الصفقات", "أعلى الفوليوم"]
+page = st.tabs(tabs)
+
+# تحميل البيانات
+df = load_stocks()
+df = add_signals(df)
 
 # =============================
 # تاب فرص مضاربية
 # =============================
-with tabs[0]:
+with page[0]:
     st.subheader("فرص مضاربية")
-    df = load_stocks()
-    df = add_signals(df)
     if df.empty:
         st.info("لا توجد بيانات حالياً")
     else:
@@ -115,7 +113,7 @@ with tabs[0]:
 # =============================
 # تاب أقوى الأسهم
 # =============================
-with tabs[1]:
+with page[1]:
     st.subheader("أقوى الأسهم")
     strong_df = df[df["قوة السهم"].isin(["⭐ قوي","⚡ متوسط"])]
     if strong_df.empty:
@@ -126,7 +124,7 @@ with tabs[1]:
 # =============================
 # تاب إدارة الصفقة
 # =============================
-with tabs[2]:
+with page[2]:
     st.subheader("إدارة الصفقة")
     symbol = st.text_input("رمز السهم")
     price_buy = st.number_input("سعر الشراء", min_value=0.0, step=0.01)
@@ -139,11 +137,11 @@ with tabs[2]:
 # =============================
 # تاب تتبع الصفقات
 # =============================
-with tabs[3]:
+with page[3]:
     st.subheader("تتبع الصفقات")
     trades_df = load_trades()
     st.dataframe(trades_df, use_container_width=True, hide_index=True)
-    
+
     st.write("أضف صفقة جديدة")
     symbol_new = st.text_input("رمز السهم جديد")
     price_new = st.number_input("سعر الشراء جديد", min_value=0.0, step=0.01)
@@ -157,3 +155,15 @@ with tabs[3]:
             trades_df = pd.concat([trades_df, new_trade], ignore_index=True)
             save_trades(trades_df)
             st.success("تم حفظ الصفقة")
+
+# =============================
+# تاب أعلى الفوليوم
+# =============================
+with page[4]:
+    st.subheader("أعلى الفوليوم")
+    # حالياً مجرد عرض الفوليوم النسبي الموجود في CSV
+    hv_df = df[df["Relative Volume"] > 1.5]  # مثال: أعلى من المتوسط 1.5
+    if hv_df.empty:
+        st.info("لا توجد أسهم بفوليوم مرتفع حالياً")
+    else:
+        st.dataframe(hv_df, use_container_width=True, hide_index=True)
