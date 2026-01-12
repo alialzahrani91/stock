@@ -9,8 +9,8 @@ st.set_page_config(page_title="Market Dashboard", layout="wide")
 # ملفات الأسواق (CSV) – كل ملف يحتوي عمود Symbol فقط
 # ==============================
 MARKET_FILES = {
-    "السوق السعودي": "ksa_stocks.csv",
-    "السوق الأمريكي": "usa_stocks.csv"
+    "السوق السعودي": "ksa_symbols.csv",
+    "السوق الأمريكي": "usa_symbols.csv"
 }
 
 TRADES_FILE = "trades.csv"
