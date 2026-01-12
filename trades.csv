@@ -1,7 +1,2 @@
-Date,Symbol,Price,Quantity
-2026-01-01,AAPL,150.50,10
-2026-01-03,TSLA,720.30,5
-2026-01-05,AMZN,3300.00,2
-2026-01-06,MSFT,305.20,8
-2026-01-07,NFLX,510.10,4
-
+Date,Symbol,Price,Quantity,CurrentPrice,GainPercent,Recommendation
+2026-01-12,AAPL,150,10,155,3.33,⏳ استمر
