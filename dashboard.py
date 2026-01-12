@@ -3,198 +3,196 @@ import pandas as pd
 import requests
 from datetime import datetime
 
-st.set_page_config(page_title="Market Dashboard", layout="wide")
+st.set_page_config(page_title="📊 Market Dashboard", layout="wide")
 
-# ملفات الأسواق
+# ==============================
+# إعدادات الملفات لكل سوق
+# ==============================
 MARKET_FILES = {
-    "السعودي": "ksa_stocks.csv",
-    "الأمريكي": "usa_stocks.csv"
+    "السعودي": "ksa_symbols.csv",
+    "الأمريكي": "usa_symbols.csv"
 }
+
 TRADES_FILE = "trades.csv"
+HEADERS = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
 
 # ==============================
-# جلب بيانات السوق (TradingView API) للأعمدة الأساسية
+# دالة لجلب بيانات الأسهم من الإنترنت
 # ==============================
-def fetch_market_data(symbols):
-    rows = []
-    for sym in symbols:
-        try:
-            url = f"https://scanner.tradingview.com/america/scan"
-            payload = {
-                "filter": [{"left":"symbol","operation":"equal","right":sym}],
-                "columns":["close","change","relative_volume_10d_calc","RSI","price_earnings_ttm"]
-            }
-            r = requests.post(url, json=payload, timeout=10)
-            r.raise_for_status()
-            data = r.json().get("data", [])
-            if data:
-                d = data[0]["d"]
-                rows.append({
-                    "Symbol": sym,
-                    "Price": float(d[0]),
-                    "Change %": float(d[1]),
-                    "Relative Volume": float(d[2]),
-                    "RSI": float(d[3]),
-                    "PE": float(d[4]) if d[4] else None
-                })
-        except:
-            continue
-    return pd.DataFrame(rows)
+def fetch_stock_data(symbol):
+    """
+    جلب البيانات الأساسية من TradingView API أو أي مصدر متاح
+    """
+    url = "https://scanner.tradingview.com/america/scan"  # مثال للسوق الأمريكي
+    payload = {
+        "filter":[{"left":"name","operation":"equal","right":symbol}],
+        "symbols":{"query":{"types":[]},"tickers":[]},
+        "columns":["close","change","relative_volume_10d_calc","price_earnings_ttm"]
+    }
+    try:
+        r = requests.post(url,json=payload,headers=HEADERS,timeout=10)
+        data = r.json().get("data",[])
+        if not data:
+            return {"Price": None, "Change %": None, "Relative Volume": None, "PE": None}
+        d = data[0]["d"]
+        return {
+            "Price": float(d[0]),
+            "Change %": float(d[1]),
+            "Relative Volume": float(d[2]),
+            "PE": float(d[3]) if d[3] else None
+        }
+    except:
+        return {"Price": None, "Change %": None, "Relative Volume": None, "PE": None}
 
 # ==============================
-# إشارات وتحليل الأسهم
+# تحميل الرموز من ملف CSV
+# ==============================
+def load_symbols(market):
+    try:
+        df = pd.read_csv(MARKET_FILES[market])
+        df = df.rename(columns={df.columns[0]: "Symbol"})
+        return df
+    except:
+        st.error(f"❌ لم يتم العثور على ملف الأسهم للسوق {market}")
+        return pd.DataFrame(columns=["Symbol"])
+
+# ==============================
+# تحليل الأسهم
 # ==============================
 def analyze_stocks(df):
+    if df.empty:
+        return df
+    df["Price"] = None
+    df["Change %"] = None
+    df["Relative Volume"] = None
+    df["PE"] = None
+
+    # جلب البيانات لكل سهم
+    for idx, row in df.iterrows():
+        data = fetch_stock_data(row["Symbol"])
+        df.at[idx, "Price"] = data["Price"]
+        df.at[idx, "Change %"] = data["Change %"]
+        df.at[idx, "Relative Volume"] = data["Relative Volume"]
+        df.at[idx, "PE"] = data["PE"]
+
+    # تصنيف الأسهم
     df["الحالة"] = "🟡 مراقبة"
     df["إشارة"] = "❌ لا"
     df["سعر الدخول"] = None
     df["جني الأرباح"] = None
     df["وقف الخسارة"] = None
     df["قوة السهم"] = "🔴 ضعيف"
-    df["Score"] = 0
 
-    strong_buy = (df["Change %"]>2) & (df["Relative Volume"]>1.5) & (df["PE"].fillna(100)<30)
-    potential_buy = ((df["Change %"]>1) | (df["Relative Volume"]>1.2)) & (df["PE"].fillna(100)<50)
+    strong_buy = (df["Change %"] > 2) & (df["Relative Volume"] > 1.5) & (df["PE"].fillna(100) < 30)
+    potential_buy = ((df["Change %"] > 1) | (df["Relative Volume"] > 1.2)) & (df["PE"].fillna(100) < 50)
 
-    df.loc[strong_buy,"الحالة"]="⭐ قوي للشراء"
-    df.loc[potential_buy & ~strong_buy,"الحالة"]="⚡ فرصة محتملة"
-    df.loc[df["Change %"]<0,"الحالة"]="🔴 ضعيف"
+    df.loc[strong_buy, "الحالة"] = "⭐ قوي للشراء"
+    df.loc[potential_buy & ~strong_buy, "الحالة"] = "⚡ فرصة محتملة"
+    df.loc[df["Change %"] < 0, "الحالة"] = "🔴 ضعيف"
 
-    df.loc[strong_buy,"قوة السهم"]="⭐ قوي"
-    df.loc[potential_buy & ~strong_buy,"قوة السهم"]="⚡ متوسط"
+    df.loc[strong_buy, "قوة السهم"] = "⭐ قوي"
+    df.loc[potential_buy & ~strong_buy, "قوة السهم"] = "⚡ متوسط"
 
-    df.loc[strong_buy,"إشارة"]="🔥 شراء"
-    df.loc[strong_buy,"سعر الدخول"]=df["Price"]
-    df.loc[strong_buy,"جني الأرباح"]=(df["Price"]*1.05).round(2)
-    df.loc[strong_buy,"وقف الخسارة"]=(df["Price"]*0.975).round(2)
-    df.loc[strong_buy,"Score"]=2
+    df.loc[strong_buy, "إشارة"] = "🔥 شراء"
+    df.loc[strong_buy, "سعر الدخول"] = df["Price"]
+    df.loc[strong_buy, "جني الأرباح"] = (df["Price"] * 1.05).round(2)
+    df.loc[strong_buy, "وقف الخسارة"] = (df["Price"] * 0.975).round(2)
 
-    df.loc[potential_buy & ~strong_buy,"إشارة"]="⚡ متابعة"
-    df.loc[potential_buy & ~strong_buy,"سعر الدخول"]=df["Price"]
-    df.loc[potential_buy & ~strong_buy,"جني الأرباح"]=(df["Price"]*1.03).round(2)
-    df.loc[potential_buy & ~strong_buy,"وقف الخسارة"]=(df["Price"]*0.985).round(2)
-    df.loc[potential_buy & ~strong_buy,"Score"]=1
+    df.loc[potential_buy & ~strong_buy, "إشارة"] = "⚡ متابعة"
+    df.loc[potential_buy & ~strong_buy, "سعر الدخول"] = df["Price"]
+    df.loc[potential_buy & ~strong_buy, "جني الأرباح"] = (df["Price"] * 1.03).round(2)
+    df.loc[potential_buy & ~strong_buy, "وقف الخسارة"] = (df["Price"] * 0.985).round(2)
 
     return df
 
 # ==============================
-# إدارة الصفقات وتحليلها
-# ==============================
-def trade_recommendation(price_buy, current_price):
-    gain = (current_price-price_buy)/price_buy*100
-    if gain>=5:
-        return "💰 بيع جزئي"
-    elif gain<=-3:
-        return "⚠️ وقف الخسارة / بيع"
-    else:
-        return "⏳ استمر"
-
-# ==============================
-# تحميل وحفظ الصفقات
+# حفظ وتابع الصفقات
 # ==============================
 def load_trades():
     try:
         return pd.read_csv(TRADES_FILE)
     except:
-        return pd.DataFrame(columns=["Date","Symbol","Price","Quantity","CurrentPrice","GainPercent","Recommendation"])
+        return pd.DataFrame(columns=["Date","Symbol","Price","Quantity","Action"])
 
 def save_trades(df):
-    df.to_csv(TRADES_FILE,index=False)
-
-def update_trades(df, market_symbols):
-    market_data = fetch_market_data(market_symbols)
-    for idx,row in df.iterrows():
-        sym_data = market_data[market_data["Symbol"]==row["Symbol"]]
-        if not sym_data.empty:
-            current_price = sym_data["Price"].values[0]
-            gain = (current_price-row["Price"])/row["Price"]*100
-            rec = trade_recommendation(row["Price"], current_price)
-            df.at[idx,"CurrentPrice"]=current_price
-            df.at[idx,"GainPercent"]=round(gain,2)
-            df.at[idx,"Recommendation"]=rec
-    return df
+    df.to_csv(TRADES_FILE, index=False)
 
 # ==============================
 # واجهة المستخدم
 # ==============================
 st.title("📊 Market Dashboard")
 
-# اختيار السوق
 market_choice = st.selectbox("اختر السوق", list(MARKET_FILES.keys()))
-symbols_df = pd.read_csv(MARKET_FILES[market_choice])
-symbols = symbols_df["Symbol"].tolist()
+symbols_df = load_symbols(market_choice)
+df = analyze_stocks(symbols_df)
 
-# التابات
-tabs = st.tabs(["تحليل الأسهم","أقوى الأسهم","توصيات شراء","إدارة الصفقة","تتبع الصفقات"])
+tabs = st.tabs(["تحليل الأسهم","أقوى الأسهم","توصيات شراء","إدارة الصفقات","تدريب النظام"])
 
 # ==============================
-# تاب 1: تحليل الأسهم
+# تاب تحليل الأسهم
 # ==============================
 with tabs[0]:
-    st.subheader("تحليل الأسهم")
-    df = fetch_market_data(symbols)
-    df = analyze_stocks(df)
-    st.dataframe(df,use_container_width=True)
+    st.subheader("تحليل جميع الأسهم")
+    if df.empty:
+        st.info("لا توجد بيانات")
+    else:
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ==============================
-# تاب 2: أقوى الأسهم
+# تاب أقوى الأسهم
 # ==============================
 with tabs[1]:
-    st.subheader("أقوى الأسهم")
     strong_df = df[df["قوة السهم"].isin(["⭐ قوي","⚡ متوسط"])]
-    st.dataframe(strong_df,use_container_width=True)
+    st.subheader("أقوى الأسهم")
+    if strong_df.empty:
+        st.info("لا توجد أسهم قوية")
+    else:
+        st.dataframe(strong_df, use_container_width=True, hide_index=True)
 
 # ==============================
-# تاب 3: توصيات شراء
+# تاب توصيات شراء
 # ==============================
 with tabs[2]:
-    st.subheader("توصيات شراء")
     buy_df = df[df["إشارة"]=="🔥 شراء"]
-    st.dataframe(buy_df,use_container_width=True)
+    st.subheader("توصيات شراء")
+    if buy_df.empty:
+        st.info("لا توجد توصيات شراء حالياً")
+    else:
+        st.dataframe(buy_df, use_container_width=True, hide_index=True)
 
 # ==============================
-# تاب 4: إدارة الصفقة
+# تاب إدارة الصفقات
 # ==============================
 with tabs[3]:
-    st.subheader("إدارة الصفقة")
-    symbol_input = st.text_input("رمز السهم")
-    price_input = st.number_input("سعر الشراء", min_value=0.0, step=0.01)
-    if st.button("تحليل الصفقة"):
-        if symbol_input and price_input>0:
-            sym_data = df[df["Symbol"]==symbol_input]
-            if not sym_data.empty:
-                current_price = sym_data["Price"].values[0]
-                rec = trade_recommendation(price_input, current_price)
-                st.write(f"السعر الحالي: {current_price}")
-                st.write(f"التوصية: {rec}")
-            else:
-                st.warning("❌ السهم غير موجود في قائمة السوق")
-
-# ==============================
-# تاب 5: تتبع الصفقات + التدريب
-# ==============================
-with tabs[4]:
-    st.subheader("تتبع الصفقات + تدريب النظام")
+    st.subheader("إدارة الصفقات")
     trades_df = load_trades()
-    trades_df = update_trades(trades_df, symbols)
-    st.dataframe(trades_df,use_container_width=True)
+    st.dataframe(trades_df, use_container_width=True, hide_index=True)
 
     st.write("أضف صفقة جديدة")
-    new_symbol = st.text_input("رمز السهم جديد")
-    new_price = st.number_input("سعر الشراء جديد",min_value=0.0,step=0.01)
-    new_qty = st.number_input("عدد الأسهم",min_value=1,step=1)
-    new_date = st.date_input("تاريخ الشراء", datetime.today())
+    symbol_new = st.text_input("رمز السهم")
+    price_new = st.number_input("سعر الشراء", min_value=0.0, step=0.01)
+    qty_new = st.number_input("عدد الأسهم", min_value=1, step=1)
+    date_new = st.date_input("تاريخ الشراء", datetime.today())
+    action_new = st.selectbox("نوع العملية", ["شراء","بيع"])
+
     if st.button("حفظ الصفقة"):
-        if new_symbol and new_price>0 and new_qty>0:
+        if symbol_new and price_new>0 and qty_new>0:
             new_trade = pd.DataFrame([{
-                "Date": new_date,
-                "Symbol": new_symbol,
-                "Price": new_price,
-                "Quantity": new_qty,
-                "CurrentPrice": new_price,
-                "GainPercent": 0.0,
-                "Recommendation": "⏳ استمر"
+                "Date": date_new,
+                "Symbol": symbol_new,
+                "Price": price_new,
+                "Quantity": qty_new,
+                "Action": action_new
             }])
             trades_df = pd.concat([trades_df,new_trade],ignore_index=True)
             save_trades(trades_df)
-            st.success("✅ تم حفظ الصفقة")
+            st.success("تم حفظ الصفقة")
+
+# ==============================
+# تاب تدريب النظام
+# ==============================
+with tabs[4]:
+    st.subheader("تدريب النظام على الصفقات")
+    trades_df = load_trades()
+    st.write("بيانات الصفقات السابقة")
+    st.dataframe(trades_df, use_container_width=True)
