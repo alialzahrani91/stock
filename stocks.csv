@@ -1,11 +1,6 @@
-Symbol,Company,Price,Change %,Relative Volume,PE
-AAPL,Apple Inc,170,1.2,1.3,28
-TSLA,Tesla Inc,700,2.5,1.8,50
-AMZN,Amazon.com,130,0.8,1.0,60
-MSFT,Microsoft Corp,310,1.5,1.6,35
-NVDA,Nvidia Corp,420,3.0,2.0,45
-GOOGL,Alphabet Inc,140,0.5,1.1,25
-META,Meta Platforms,220,2.2,1.7,30
-NFLX,Netflix Inc,450,-0.5,1.0,40
-INTC,Intel Corp,50,1.0,1.2,12
-AMD,Advanced Micro Devices,100,2.8,1.9,32
+Symbol
+TADAWUL:2222
+TADAWUL:1150
+NASDAQ:AAPL
+NASDAQ:MSFT
+NASDAQ:TSLA
