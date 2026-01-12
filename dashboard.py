@@ -168,8 +168,9 @@ with page[1]:
 # =============================
 with page[2]:
     st.subheader("إدارة الصفقة")
-    symbol = st.text_input("رمز السهم (EXCHANGE:SYMBOL)")
-    price_buy = st.number_input("سعر الشراء", min_value=0.0, step=0.01)
+   symbol = st.text_input("رمز السهم (EXCHANGE:SYMBOL)", key="trade_symbol")
+price_buy = st.number_input("سعر الشراء", min_value=0.0, step=0.01, key="trade_price")
+
     if st.button("تحليل الصفقة"):
         try:
             yf_symbol = symbol.split(":")[-1]
@@ -188,9 +189,10 @@ with page[3]:
     st.dataframe(trades_df, use_container_width=True, hide_index=True)
 
     st.write("إضافة صفقة جديدة")
-    symbol_new = st.text_input("رمز السهم")
-    price_new = st.number_input("سعر الشراء", min_value=0.0, step=0.01)
-    qty_new = st.number_input("عدد الأسهم", min_value=1)
+   symbol_new = st.text_input("رمز السهم", key="new_trade_symbol")
+price_new = st.number_input("سعر الشراء", min_value=0.0, step=0.01, key="new_trade_price")
+qty_new = st.number_input("عدد الأسهم", min_value=1, key="new_trade_qty")
+
     date_new = st.date_input("تاريخ الشراء", datetime.today())
 
     if st.button("حفظ الصفقة"):
